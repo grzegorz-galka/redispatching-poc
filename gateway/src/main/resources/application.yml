@@ -1,0 +1,41 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: redispatch-gateway
+  cloud:
+    gateway:
+      routes:
+        # Route for SSE streaming
+        - id: redispatch-sse
+          uri: http://localhost:8081
+          predicates:
+            - Path=/v1/redispatch/{entityId}/stream
+          filters:
+            - StripPrefix=1
+          metadata:
+            response-timeout: -1
+            connect-timeout: 5000
+
+        # Route for REST API
+        - id: redispatch-api
+          uri: http://localhost:8081
+          predicates:
+            - Path=/v1/redispatch/**
+          filters:
+            - StripPrefix=1
+
+      httpclient:
+        connect-timeout: 5000
+        response-timeout: 60s
+        pool:
+          type: ELASTIC
+          max-idle-time: 10s
+
+# Logging
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    reactor.netty: DEBUG
+    org.springframework.web.reactive: DEBUG

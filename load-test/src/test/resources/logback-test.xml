@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Gatling loggers -->
+    <logger name="io.gatling" level="WARN"/>
+    <logger name="io.gatling.http.engine.response" level="OFF"/>
+    <logger name="io.netty" level="WARN"/>
+
+    <!-- Our load test loggers -->
+    <logger name="pl.tso.redispatch.loadtest" level="INFO"/>
+
+    <root level="WARN">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>

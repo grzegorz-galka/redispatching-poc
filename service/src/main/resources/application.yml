@@ -1,0 +1,17 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: redispatch-service
+
+# SSE Configuration
+sse:
+  heartbeat-interval-seconds: 30
+  order-generation-interval-seconds: 60
+
+# Logging
+logging:
+  level:
+    pl.tso.redispatch: INFO
+    org.springframework.web: INFO
