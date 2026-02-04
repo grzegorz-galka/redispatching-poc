@@ -1,0 +1,20 @@
+server:
+  port: 8082  # Different port from gateway (8080) and service (8081)
+
+spring:
+  application:
+    name: redispatch-client
+  main:
+    web-application-type: reactive  # Keep reactive for WebClient support
+
+# Client Configuration
+client:
+  gateway-url: http://localhost:8080/v1
+  entity-id: ENT01
+
+# Logging
+logging:
+  level:
+    pl.tso.redispatch.client: INFO
+    reactor.netty: WARN
+    org.springframework.web: WARN
