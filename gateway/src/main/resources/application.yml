@@ -1,5 +1,9 @@
 server:
   port: 8080
+  netty:
+    connection-timeout: 10s
+    # Allow more concurrent connections
+    max-keep-alive-requests: 10000
 
 spring:
   application:
@@ -32,10 +36,13 @@ spring:
         pool:
           type: ELASTIC
           max-idle-time: 10s
+          max-connections: 5000
+          acquire-timeout: 10000
+          evict-in-background: 30s
 
 # Logging
 logging:
   level:
-    org.springframework.cloud.gateway: DEBUG
-    reactor.netty: DEBUG
-    org.springframework.web.reactive: DEBUG
+    org.springframework.cloud.gateway: INFO
+    reactor.netty: INFO
+    org.springframework.web.reactive: INFO

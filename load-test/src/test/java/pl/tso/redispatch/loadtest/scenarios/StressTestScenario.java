@@ -8,9 +8,6 @@ import pl.tso.redispatch.loadtest.utils.EntityIdFeeder;
 import pl.tso.redispatch.loadtest.utils.SseDataExtractor;
 
 import java.time.Duration;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static io.gatling.javaapi.core.CoreDsl.*;
 import static io.gatling.javaapi.http.HttpDsl.*;
@@ -61,28 +58,22 @@ public class StressTestScenario extends Simulation {
 
         // Process orders (up to 5 during stress test)
         .repeat(5, "orderCount").on(
-            // Shorter pause between orders (30-60s instead of 60-90s)
-            pause(Duration.ofSeconds(
-                ThreadLocalRandom.current().nextInt(30, 61)
-            ))
-
-            // Generate mock order ID
-            .exec(session -> {
-                int orderNum = ThreadLocalRandom.current().nextInt(1, 10000);
-                String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"));
-                String orderId = orderNum + "/I/" + dateStr;
-                String encodedOrderId = java.net.URLEncoder.encode(orderId, java.nio.charset.StandardCharsets.UTF_8);
-                String resourceUrl = "/redispatch/" + session.getString("entityId") + "/orders/" + encodedOrderId;
-
-                return session
-                    .set("orderId", orderId)
-                    .set("resourceUrl", resourceUrl);
-            })
+            // Wait for ORDER_ISSUED event from SSE stream
+            // Use matching() to filter only ORDER_ISSUED events (ignore heartbeats)
+            exec(
+                sse("Open SSE Connection").setCheck()
+                    .await(LoadTestConfig.SSE_AWAIT_ORDER_TIMEOUT).on(
+                        sse.checkMessage("ORDER_ISSUED")
+                            .matching(jsonPath("$.event").is("ORDER_ISSUED"))
+                            .check(jsonPath("$.data").transform(SseDataExtractor.field("redispatchOrderId")).saveAs("orderId"))
+                            .check(jsonPath("$.data").transform(SseDataExtractor.field("resourceUrl")).saveAs("resourceUrl"))
+                    )
+            )
 
             // Fetch order details (accept rate limiting)
             .exec(
                 http("GET Order Details")
-                    .get("#{resourceUrl}")
+                    .get("/v1#{resourceUrl}")
                     .check(status().in(200, 429, 503).saveAs("httpStatus"))
                     .check(jsonPath("$.redispatchOrderId").optional())
             )
@@ -94,17 +85,15 @@ public class StressTestScenario extends Simulation {
             }).then(
                 exec(
                     http("POST Acknowledgement")
-                        .post("#{resourceUrl}/acknowledgement")
+                        .post("/v1#{resourceUrl}/acknowledgement")
                         .body(StringBody(session -> {
-                            long timestamp = System.currentTimeMillis();
                             return String.format(
                                 "{\"redispatchOrderId\":\"%s\"," +
                                 "\"entityId\":\"%s\"," +
                                 "\"status\":\"RECEIVED\"," +
-                                "\"timestamp\":\"%d\"}",
+                                "\"reason\":null}",
                                 session.get("orderId"),
-                                session.get("entityId"),
-                                timestamp
+                                session.get("entityId")
                             );
                         }))
                         .check(status().in(202, 429, 503))
