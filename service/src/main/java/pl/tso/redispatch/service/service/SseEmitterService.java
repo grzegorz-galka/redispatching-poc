@@ -28,8 +28,8 @@ public class SseEmitterService {
 
     private static final Logger log = LoggerFactory.getLogger(SseEmitterService.class);
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
-    private static final Duration ORDER_MIN_INTERVAL = Duration.ofSeconds(60);
-    private static final Duration ORDER_MAX_INTERVAL = Duration.ofSeconds(90);
+    private static final Duration ORDER_MIN_INTERVAL = Duration.ofSeconds(20);
+    private static final Duration ORDER_MAX_INTERVAL = Duration.ofSeconds(40);
 
     private final RedispatchOrderService orderService;
     private final ObjectMapper objectMapper;

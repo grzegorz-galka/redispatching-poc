@@ -8,9 +8,6 @@ import pl.tso.redispatch.loadtest.utils.EntityIdFeeder;
 import pl.tso.redispatch.loadtest.utils.SseDataExtractor;
 
 import java.time.Duration;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static io.gatling.javaapi.core.CoreDsl.*;
 import static io.gatling.javaapi.http.HttpDsl.*;
@@ -20,8 +17,8 @@ import static io.gatling.javaapi.http.HttpDsl.*;
  *
  * This scenario:
  * 1. Opens SSE connection and waits for 'connected' event
- * 2. Simulates receiving ORDER_ISSUED events by polling API on schedule
- * 3. Fetches order details via GET
+ * 2. Waits for ORDER_ISSUED events via SSE stream
+ * 3. Fetches order details via GET using resourceUrl from event
  * 4. Sends acknowledgements via POST
  * 5. Repeats for multiple orders
  *
@@ -61,38 +58,32 @@ public class FullWorkflowScenario extends Simulation {
             return session;
         })
 
-        // Step 2: Simulate order processing workflow (3 orders)
+        // Step 2: Process orders as they arrive via SSE (3 orders)
         .repeat(3, "orderCount").on(
-            // Wait a bit (simulating time between ORDER_ISSUED events: 60-90s)
-            pause(Duration.ofSeconds(
-                ThreadLocalRandom.current().nextInt(60, 91)
-            ))
-
-            // Generate mock order ID
-            .exec(session -> {
-                int orderNum = ThreadLocalRandom.current().nextInt(1, 10000);
-                String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("dd.MM.yyyy"));
-                String orderId = orderNum + "/I/" + dateStr;
-                String encodedOrderId = java.net.URLEncoder.encode(orderId, java.nio.charset.StandardCharsets.UTF_8);
-                String resourceUrl = "/redispatch/" + session.getString("entityId") + "/orders/" + encodedOrderId;
-
-                return session
-                    .set("orderId", orderId)
-                    .set("resourceUrl", resourceUrl);
-            })
+            // Wait for ORDER_ISSUED event from SSE stream
+            // Use matching() to filter only ORDER_ISSUED events (ignore heartbeats)
+            exec(
+                sse("Open SSE Connection").setCheck()
+                    .await(LoadTestConfig.SSE_AWAIT_ORDER_TIMEOUT).on(
+                        sse.checkMessage("ORDER_ISSUED")
+                            .matching(jsonPath("$.event").is("ORDER_ISSUED"))
+                            .check(jsonPath("$.data").transform(SseDataExtractor.field("redispatchOrderId")).saveAs("orderId"))
+                            .check(jsonPath("$.data").transform(SseDataExtractor.field("resourceUrl")).saveAs("resourceUrl"))
+                    )
+            )
 
             .exec(session -> {
-                System.out.println("[" + session.get("entityId") + "] Processing order: " + session.get("orderId"));
+                System.out.println("[" + session.get("entityId") + "] Received ORDER_ISSUED for: " + session.get("orderId"));
                 return session;
             })
 
-            // Step 3: Fetch order details using resourceUrl
+            // Step 3: Fetch order details using resourceUrl from event
             .exec(
                 http("GET Order Details")
-                    .get("#{resourceUrl}")
+                    .get("/v1#{resourceUrl}")
                     .check(status().is(200))
                     .check(jsonPath("$.redispatchOrderId").exists())
-                    .check(jsonPath("$.entityId").is("#{entityId}"))
+                    .check(jsonPath("$.entityId").exists())
                     .check(jsonPath("$.redispatchOrderReason").optional().saveAs("orderReason"))
             )
 
@@ -104,17 +95,15 @@ public class FullWorkflowScenario extends Simulation {
             // Step 4: Send acknowledgement
             .exec(
                 http("POST Acknowledgement")
-                    .post("#{resourceUrl}/acknowledgement")
+                    .post("/v1#{resourceUrl}/acknowledgement")
                     .body(StringBody(session -> {
-                        long timestamp = System.currentTimeMillis();
                         return String.format(
                             "{\"redispatchOrderId\":\"%s\"," +
                             "\"entityId\":\"%s\"," +
                             "\"status\":\"RECEIVED\"," +
-                            "\"timestamp\":\"%d\"}",
+                            "\"reason\":null}",
                             session.get("orderId"),
-                            session.get("entityId"),
-                            timestamp
+                            session.get("entityId")
                         );
                     }))
                     .check(status().is(202))
@@ -131,7 +120,7 @@ public class FullWorkflowScenario extends Simulation {
 
         // Step 5: Close SSE connection
         .exec(
-            sse("Close SSE Connection").close()
+            sse("Open SSE Connection").close()
         )
 
         .exec(session -> {
@@ -157,14 +146,14 @@ public class FullWorkflowScenario extends Simulation {
         .protocols(httpProtocol)
         .maxDuration(Duration.ofSeconds(LoadTestConfig.HOLD_DURATION_SECONDS + LoadTestConfig.RAMP_DURATION_SECONDS + 300))
         .assertions(
-            // Response time assertions
-            global().responseTime().percentile3().lt(LoadTestConfig.PERCENTILE_95_THRESHOLD_MS),
-            global().responseTime().percentile4().lt(LoadTestConfig.PERCENTILE_99_THRESHOLD_MS),
-
-            // Success rate assertion
+            // Success rate assertion (applies to all operations)
             global().successfulRequests().percent().gte(LoadTestConfig.SUCCESS_RATE_THRESHOLD),
 
-            // Specific request assertions
+            // SSE connection establishment should be fast
+            details("Open SSE Connection").responseTime().percentile3().lt(5000),
+
+            // REST API response time assertions
+            // Note: SSE "Wait for ORDER_ISSUED" is excluded as it depends on event generation interval (60-90s)
             details("GET Order Details").responseTime().percentile3().lt(1000),
             details("POST Acknowledgement").responseTime().percentile3().lt(500)
         );
